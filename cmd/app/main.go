@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/1299172402/lanzou-upload-golang/internal/lanzou"
+	"github.com/1299172402/lanzou-upload-golang/lanzou"
 )
 
 func main() {
