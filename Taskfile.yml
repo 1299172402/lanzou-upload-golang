@@ -1,0 +1,19 @@
+version: '3'
+
+dotenv: ['.env']
+
+tasks:
+  default:
+    desc: 列出可用任务
+    cmds:
+      - task --list
+
+  upload:
+    desc: "上传文件到蓝奏云, 用法: task upload FILE=<文件路径>"
+    cmds:
+      - go run ./cmd/app -file "{{.FILE}}"
+
+  build:
+    desc: 编译到 bin/app
+    cmds:
+      - go build -o bin/app ./cmd/app
