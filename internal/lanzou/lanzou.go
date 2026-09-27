@@ -6,12 +6,20 @@ import (
 	"io"
 	"mime"
 	"mime/multipart"
+	"net"
 	"net/http"
 	"os"
 	"path/filepath"
+	"time"
 )
 
-const uploadURL = "https://pc.woozooo.com/html5up.php"
+const (
+	uploadURL = "https://pc.woozooo.com/html5up.php"
+	// maxRetries 是上传失败后的最大尝试次数（含首次）。
+	maxRetries = 10
+	// connectTimeout 是单次上传请求的超时时间。
+	connectTimeout = time.Hour
+)
 
 func Upload(filePath, folderID, cookie string) (string, error) {
 	f, err := os.Open(filePath)
@@ -65,29 +73,70 @@ func Upload(filePath, folderID, cookie string) (string, error) {
 		return "", err
 	}
 
-	req, err := http.NewRequest(http.MethodPost, uploadURL, &buf)
+	contentType := w.FormDataContentType()
+	// 缓存请求体，便于重试时重复发送。
+	bodyBytes := buf.Bytes()
+
+	client := &http.Client{
+		Timeout: connectTimeout,
+		Transport: &http.Transport{
+			DialContext: (&net.Dialer{
+				Timeout:   connectTimeout,
+				KeepAlive: 30 * time.Second,
+			}).DialContext,
+			TLSHandshakeTimeout:   30 * time.Second,
+			ResponseHeaderTimeout: connectTimeout,
+			ExpectContinueTimeout: time.Second,
+		},
+	}
+	defer client.CloseIdleConnections()
+
+	var lastErr error
+	for attempt := 1; attempt <= maxRetries; attempt++ {
+		body, err := sendUpload(client, bodyBytes, contentType, cookie)
+		if err == nil {
+			return body, nil
+		}
+		lastErr = err
+
+		if attempt < maxRetries {
+			// 指数退避，最长 30 秒。
+			backoff := time.Duration(1<<uint(attempt-1)) * time.Second
+			if backoff > 30*time.Second {
+				backoff = 30 * time.Second
+			}
+			time.Sleep(backoff)
+		}
+	}
+	return "", fmt.Errorf("上传失败，已重试 %d 次: %w", maxRetries, lastErr)
+}
+
+// sendUpload 执行一次上传请求。
+func sendUpload(client *http.Client, body []byte, contentType, cookie string) (string, error) {
+	req, err := http.NewRequest(http.MethodPost, uploadURL, bytes.NewReader(body))
 	if err != nil {
 		return "", err
 	}
-	req.Header.Set("Content-Type", w.FormDataContentType())
+	req.ContentLength = int64(len(body))
+	req.Header.Set("Content-Type", contentType)
 	req.Header.Set("Accept", "*/*")
 	req.Header.Set("Origin", "https://pc.woozooo.com")
 	req.Header.Set("Referer", "https://pc.woozooo.com/mydisk.php?item=files&action=index")
 	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/152.0.0.0 Safari/537.36 Edg/152.0.0.0")
 	req.Header.Set("Cookie", cookie)
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := client.Do(req)
 	if err != nil {
 		return "", err
 	}
 	defer resp.Body.Close()
 
-	body, err := io.ReadAll(resp.Body)
+	respBody, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return "", err
 	}
 	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("HTTP %d: %s", resp.StatusCode, body)
+		return "", fmt.Errorf("HTTP %d: %s", resp.StatusCode, respBody)
 	}
-	return string(body), nil
+	return string(respBody), nil
 }
