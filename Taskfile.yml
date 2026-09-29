@@ -17,3 +17,13 @@ tasks:
     desc: 编译到 bin/app
     cmds:
       - go build -o bin/app ./cmd/app
+  
+  build-huawei:
+    desc: 华为云函数 custom runtime 版本编译
+    platforms: [linux]
+    env:
+      CGO_ENABLED: "0"
+      GOOS: linux
+      GOARCH: amd64
+    cmds:
+      - go build -ldflags="-linkmode=internal -s -w" -o build/lanup cmd/app/main.go

@@ -1,3 +1,2 @@
-*.exe
 .env
-bin/
+build
